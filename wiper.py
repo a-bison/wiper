@@ -297,6 +297,15 @@ class JobTask:
     async def run(self, header):
         raise NotImplemented("Subclass JobTask to implement specific tasks.")
 
+    # Pretty print info about this task. This should only return information
+    # included in the header.properties dictionary. Higher level information
+    # is the responsibility of the caller.
+    def display(self, header):
+        msg = "display() not implemented for task {}"
+        logging.warning(msg.format(header.task_type))
+
+        return ""
+
 
 # Very simple config database consisting of json files on disk.
 # Saves a different version of the config depending on the guild.
@@ -611,6 +620,11 @@ class JobManagement(commands.Cog):
         print(h.owner_id)
         owner = self.bot.bot.get_user(h.owner_id).name
         s = "{}: owner={} type={}".format(h.id, owner, h.task_type)
+        
+        task_str = job.task.display(job.header)
+
+        if task_str:
+            s += " " + task_str
 
         return s
 
@@ -704,8 +718,12 @@ class BlockerTask(JobTask):
         while True:
             await asyncio.sleep(1)
 
+    def display(self, header):
+        return ""
+
 
 class MessageTask(JobTask):
+    MAX_MSG_DISPLAY_LEN = 15
     task_type = "message"
 
     def __init__(self, bot, guild):
@@ -728,9 +746,17 @@ class MessageTask(JobTask):
             await channel.send(p["message"])
             await asyncio.sleep(p["post_interval"])
 
-    def display(self, properties):
-        pass
-    
+    def display(self, header):
+        p = header.properties
+        msg = p["message"]
+
+        if len(msg) > MessageTask.MAX_MSG_DISPLAY_LEN:
+            msg = msg[0:MessageTask.MAX_MSG_DISPLAY_LEN] + "..."
+
+        fmt = "message=\"{}\" post_interval={} post_number={}"
+
+        return fmt.format(msg, p["post_interval"], p["post_number"])
+
 
 class WipeTask(JobTask):
     task_type = "wipe"
