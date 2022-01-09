@@ -35,6 +35,11 @@ def check_administrator():
     return commands.check(predicate)
 
 
+class NotAdministrator(discord.DiscordException):
+    def __init__(self, task):
+        self.task = task
+
+
 # Workaround until I read the docs better
 async def process_user_optional(ctx, member, rest):
     too_many_args = "Too many arguments. Try \"{}\"."
@@ -465,6 +470,7 @@ class Wiper:
 
         self.bot.event(self.on_guild_join)
         self.bot.event(self.on_ready)
+        self.bot.event(self.on_command_error)
 
         #self.bot.add_cog(Wiping(self))
         #self.bot.add_cog(Config(self))
@@ -563,6 +569,22 @@ class Wiper:
         logging.info("Joined new guild: {}({})".format(guild.name, guild.id))
         await self.config_db.create_config(guild)
 
+    async def on_command_error(self, ctx, error):
+        # If it's a generic command invoke error, use the cause exception.
+        if isinstance(error, commands.errors.CommandInvokeError):
+            if error.__cause__:
+                error = error.__cause__
+
+        if isinstance(error, commands.errors.CommandNotFound):
+            await ctx.send("Unknown command.")
+        elif isinstance(error, NotAdministrator):
+            msg = "You must have the Administrator role to {}."
+            await ctx.send(msg.format(error.task.lower()))
+        else:
+            msg = "Unexpected error in command:"
+            logging.error(msg)
+            raise error
+
 
 # Delete everything in the given channel before date_time
 async def wipe(channel, date_time):
@@ -658,11 +680,12 @@ class JobManagement(commands.Cog):
         if id in jobs:
             if (not ctx.author.guild_permissions.administrator and
                 jobs[id].header.owner_id != ctx.member.id):
-                await ctx.send("You can only delete jobs you started.")
-                return
+                raise NotAdministrator("cancel jobs started by other users")
 
             await self.jq.canceljob(id)
             await ack(ctx)
+        else:
+            await ctx.send("Job {} does not exist.".format(id))
 
     @commands.command()
     async def jobcanceluser(self, ctx, user: typing.Optional[discord.Member], *rest):
@@ -678,7 +701,7 @@ class JobManagement(commands.Cog):
 
         if (not ctx.author.guild_permissions.administrator and
             corrected_user.id != ctx.member.id):
-            await ctx.send("Cannot cancel other users' jobs.")
+            raise NotAdministrator("cancel jobs started by other users")
             return
 
         jobs = [j for _, j in self.get_guild_jobs(ctx.guild).items()
@@ -702,6 +725,19 @@ class JobManagement(commands.Cog):
         jobs = self.get_guild_jobs(ctx.guild)
         
         for id, jobs in reversed(jobs.items()):
+            await self.jq.canceljob(id)
+
+        await ack(ctx)
+
+
+    @commands.command()
+    @commands.is_owner()
+    async def jobflush(self, ctx):
+        """Cancel all jobs currently scheduled, across all servers.
+
+        You must be the owner of the bot to use this command.
+        """
+        for id, job in reversed(self.jq.jobs.items()):
             await self.jq.canceljob(id)
 
         await ack(ctx)
@@ -823,6 +859,22 @@ class Debug(commands.Cog):
     async def blockerjob(self, ctx):
         await self.bot.start_job(ctx, BlockerTask, {})
         await ack(ctx)
+
+    @commands.command()
+    async def testerror(self, ctx, error, *rest):
+        """Raise a given error to test error handling.
+        
+        Valid errors:
+        notadmin - NotAdministrator(task: str)"""
+        if error == "notadmin":
+            if len(rest) < 1:
+                await ctx.send("Not enough arguments for 'notadmin' error.")
+                return
+
+            raise NotAdministrator(rest[0])
+
+        else:
+            await ctx.send("Unknown error '{}'.".format(error))
 
 
 def main():
