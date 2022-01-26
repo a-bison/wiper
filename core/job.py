@@ -43,6 +43,15 @@ class Job:
     def __init__(self, header, task):
         self.header = header
         self.task = task
+        self.complete_event = asyncio.Event()
+
+    # Marks this job as complete, notifies all coroutines waiting on it.
+    def mark_complete(self):
+        self.complete_event.set()
+
+    # Wait for this job to finish.
+    async def wait(self):
+        await event.wait()
 
 
 # Task base class. Subclass this to create your own Tasks.
@@ -282,6 +291,10 @@ class JobQueue:
         except:
             logging.exception("Got exception while running job")
         finally:
+            if self.active_job:
+                # Notify any listeners on this job that it's done.
+                self.active_job.mark_complete()
+
             self._rm_job(self.active_job)
 
         if self.job_stop_callback:

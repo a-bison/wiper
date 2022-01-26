@@ -179,12 +179,12 @@ class CoreWrapper:
         finally:
             loop.close()
 
-    # Enqueue a new job
+    # Enqueue a new job. Returns the created job object.
     async def start_job(self, ctx, task_type, properties):
         job = await self.jobfactory.create_job(ctx, task_type, properties)
         await self.jobqueue.submit_job(job)
 
-        return job.header.id
+        return job
 
     # Schedule a job
     async def schedule_job(self, ctx, task_type, properties, cron_str):
