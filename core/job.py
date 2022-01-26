@@ -565,9 +565,13 @@ def cron_next_date(schedule, from_date=None, carry=0):
             year=year_la
         )
 
+        # FIXME This will fall over in the case that the day rolls over twice,
+        # which could happen if a day falls on a number beyond the new month.
         if extra_carry > 0:
             raise Exception("Could not recalculate dayofmonth")
 
+    # FIXME Possible bug: if month rolls over after previous calculation,
+    # days need to be recalculated, but this doesn't happen.
     next_date["dayofmonth"] = new_day
     next_date["month"], carry = _next_elem("month", next_date["month"],
                                            carry, next_date, schedule)
