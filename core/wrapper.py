@@ -13,7 +13,7 @@ from .util import ack
 
 # High level interface to the bot core.
 # Automatically links together cfg and job systems, and subscribes to
-# discord events. 
+# discord events.
 class CoreWrapper:
     def __init__(self, bot, config_path, cfgtemplate, common_cfgtemplate):
         self.cfgtemplate = dict(cfgtemplate)
@@ -201,7 +201,7 @@ class CoreWrapper:
     # Register a task class.
     def task(self, tsk):
         return self.task_registry.register(tsk)
-        
+
 
 # Optional cog containing job management commands for testing/administration
 # NOTE: This cog requires the Members intent.
@@ -391,6 +391,16 @@ class JobManagement(commands.Cog):
         else:
             await ctx.send("Schedule {} does not exist.".format(id))
 
+    @commands.command()
+    @commands.is_owner()
+    async def cronflush(self, ctx):
+        """Delete all schedules, and reset ID counter to 0. Bot owner only."""
+        for id, cron in self.jc.schedule.items():
+            await self.jc.delete_schedule(id)
+
+        await self.core.config_db.get_common_config().aset("last_schedule_id", 0)
+        await ack(ctx)
+
 
 # Optional cog for debugging core.job library functions
 class JobDebug(commands.Cog):
@@ -461,4 +471,3 @@ class JobDebug(commands.Cog):
             cron,
             next_date_time.strftime("%c")
         ))
-    
