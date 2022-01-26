@@ -70,7 +70,7 @@ class JsonConfigDB:
 
     async def write_db(self):
         for cfg in self.db.values():
-            await cfg.write()
+            await cfg.awrite()
 
     # Gets the config for a single guild. If the config for a guild doesn't
     # exist, create it.
@@ -89,13 +89,118 @@ class JsonConfigDB:
             self.db[guild.id] = JsonConfig(self.cfg_loc(guild.id), self.template)
 
 
+# Used in AtomicConfigMixin.
+def _atomic(write=True):
+    def decorator(f):
+        async def go(self, *args, **kwargs):
+            async with self:
+                result = f(self, *args, **kwargs)
+
+                if write:
+                    self.write()
+
+                return result
+
+        return go
+
+    return decorator
+
+
+# Mixin for atomic configuration. Expects the following:
+# - write() function that writes the configuration.
+# - clear() function that clears the configuration.
+# - a property called "opts" that allows dictionary operations.
+class AtomicConfigMixin:
+    def __init__(self, **kwargs):
+        self.atomic_lock = asyncio.Lock()
+    
+    def get_lock(self):
+        return self.atomic_lock
+
+    @_atomic()
+    def aset(self, key, value):
+        self.opts[key] = value
+
+    @_atomic(write=False)
+    def aget(self, key):
+        return self.opts[key]
+
+    @_atomic()
+    def aget_and_set(self, key, f):
+        self.opts[key] = f(self.opts[key])
+
+    @_atomic()
+    def adelete(self, key, ignore_keyerror=False):
+        if ignore_keyerror and key not in self.opts:
+            return
+
+        del self.opts[key]
+
+    @_atomic()
+    def awrite(self):
+        self.write()
+
+    @_atomic()
+    def aclear(self):
+        self.clear()
+
+    # Clears an entire config, and returns a copy of what was just cleared.
+    @_atomic()
+    def aget_and_clear(self):
+        cfg = dict(self.opts)
+        self.clear()
+
+        return cfg
+
+    # Allow async with to be used on the object. Just pass through to
+    # atomic_lock
+    async def __aenter__(self):
+        await self.get_lock().__aenter__()
+        return None
+
+    async def __aexit__(self, *args):
+        await self.get_lock().__aexit__(*args)
+
+
+# Enable a config to get subconfigs.
+class SubconfigMixin:
+    def sub(self, key):
+        return SubConfig(self, key, self.opts[key])
+
+
+# FIXME Not all subconfigs should be atomic...
+class SubConfig(AtomicConfigMixin, SubconfigMixin):
+    def __init__(self, parent, name, cfg):
+        super().__init__()
+
+        self.parent = parent
+        self.opts = cfg
+        self.name = name
+
+        self.invalid = False
+
+    # On clear, we create a new dict in the parent and set our reference
+    # to the new storage.
+    def clear(self):
+        self.parent.opts[self.name] = {}
+        self.opts = self.parent.opts[self.name]
+
+    def write(self):
+        self.parent.write()
+
+    # OVERRIDDEN from Atomic mixin.
+    def get_lock(self):
+        return self.parent.get_lock()
+
+
 # Simple on-disk persistent configuration for one guild (or anything else that
 # only needs one file)
-class JsonConfig:
+class JsonConfig(AtomicConfigMixin, SubconfigMixin):
     def __init__(self, path, template=None):
+        super().__init__()
+
         self.opts = {}
         self.path = path
-        self.lock = asyncio.Lock() # Lock for config writing
         self.template = template
         self.init()
 
@@ -121,64 +226,10 @@ class JsonConfig:
             self.opts = dict(self.template)
 
         self.unsafe_write()
+
+    def clear(self):
+        self.opts = {}
    
-    def get_lock(self):
-        return self.lock
-
-    async def set(self, key, value):
-        async with self.lock:
-            self.opts[key] = value
-            self.unsafe_write()
-
-    async def get(self, key):
-        async with self.lock:
-            return self.opts[key]
-
-    # Get an entry, perform f(value) on it, and set it again.
-    async def get_and_set(self, key, f):
-        async with self.lock:
-            self.opts[key] = f(self.opts[key])
-            self.unsafe_write()
-
-    # Set an entry in a sub-config.
-    async def sub_set(self, d, key, value):
-        async with self.lock:
-            if d not in self.opts:
-                self.opts[d] = {}
-
-            self.opts[d][key] = value
-            self.unsafe_write()
-
-    # Delete an entry in a sub-config.
-    async def sub_delete(self, d, key):
-        async with self.lock:
-            if d not in self.opts:
-                return
-
-            if key not in self.opts[d]:
-                return
-
-            del self.opts[d][key]
-            self.unsafe_write()
-
-    # Get a complete copy of a subconfig, then clear it.
-    async def sub_get_all_and_clear(self, d):
-        async with self.lock:
-            if d not in self.opts:
-                return {}
-
-            subconf = dict(self.opts[d])
-            self.opts[d] = {}
-            self.unsafe_write()
-
-        return subconf
-
-    def unsafe_write(self):
+    def write(self):
         with open(self.path, 'w') as f:
             json.dump(self.opts, f, indent=4)
-
-    async def write(self):
-        async with self.lock:
-            self.unsafe_write()
-
-
