@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 
+from datetime import datetime
 import json
 import logging
 import typing
@@ -248,6 +249,19 @@ class JobManagement(commands.Cog):
             await ctx.send("No jobs.")
 
     @commands.command()
+    async def jobraw(self, ctx, id: int):
+        """Print the internal representation of a job. Mostly for debugging."""
+        jobs = self.get_guild_jobs(ctx.guild)
+
+        if id in jobs:
+            raw = json.dumps(jobs[id].header.as_dict(), indent=4)
+            msg = "```\n{}\n```".format(raw)
+
+            await ctx.send(msg)
+        else:
+            await ctx.send("Job {} does not exist.".format(id))
+
+    @commands.command()
     async def jobcancel(self, ctx, id: int):
         """Cancel a job listed by ?joblist.
 
@@ -350,6 +364,19 @@ class JobManagement(commands.Cog):
             await ctx.send(msg)
         else:
             await ctx.send("Nothing scheduled.")
+
+    @commands.command()
+    async def cronraw(self, ctx, id: int):
+        """Print the internal representation of a schedule. Mostly for debugging."""
+        crons = self.get_guild_sched(ctx.guild)
+
+        if id in crons:
+            raw = json.dumps(crons[id].as_dict(), indent=4)
+            msg = "```\n{}\n```".format(raw)
+
+            await ctx.send(msg)
+        else:
+            await ctx.send("Schedule {} does not exist.".format(id))
 
     @commands.command()
     @commands.is_owner()
