@@ -60,6 +60,15 @@ class JobTask(ABC):
     async def run(self, header):
         raise NotImplemented("Subclass JobTask to implement specific tasks.")
 
+    # Optional function that returns a default dict of properties to be passed
+    # into run() on job execution. If None is returned, no defaults will be
+    # set. Optionally, the implementation may use the current properties to
+    # select new defaults.
+    @classmethod
+    def property_default(cls, properties):
+        return None
+
+    # Class method that returns the string name of this task type.
     @classmethod
     @abstractmethod
     def task_type(cls):
@@ -156,6 +165,13 @@ class JobFactory(ABC):
     def create_job_from_jobheader(self, header):
         task = self.create_task(header)
         j = Job(header, task)
+
+        # Update header.properties with declared task defaults, if any.
+        defaults = task.property_default(header.properties)
+        if defaults:
+            new_props = dict(defaults)
+            new_props.update(header.properties)
+            header.properties = new_props
 
         return j
 

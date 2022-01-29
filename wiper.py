@@ -136,17 +136,34 @@ class Wiping(commands.Cog):
 
 
 class BlockerTask(core.job.JobTask):
-    def __init__(self, bot, guild):
-        self.bot = bot
-        self.guild = guild
+    # Ignore any arguments passed in to retain compatibility with all job
+    # factories.
+    def __init__(self, *args, **kwargs):
+        pass
 
     @classmethod
     def task_type(cls):
         return "blocker"
 
+    @classmethod
+    def property_default(cls, properties):
+        return {
+            "time": 60 # seconds. if None, loops forever.
+        }
+
     async def run(self, header):
-        while True:
-            await asyncio.sleep(1)
+        p = header.properties
+        time = p["time"]
+
+        if time is None:
+            while True: 
+                await asyncio.sleep(1)
+        else:
+            counter = time
+
+            while counter > 0:
+                await asyncio.sleep(1)
+                counter -= 1
 
     def display(self, header):
         return ""
@@ -159,14 +176,6 @@ class MessageTask(core.job.JobTask):
         self.bot = bot
         self.guild = guild
 
-    # Properties:
-    #
-    # {
-    #     "message": MESSAGE
-    #     "channel": CHANNEL_ID
-    #     "post_interval": NUMBER, SECONDS
-    #     "post_number": NUMBER
-    # }
     async def run(self, header):
         p = header.properties
         channel = self.guild.get_channel(p["channel"])
@@ -178,6 +187,15 @@ class MessageTask(core.job.JobTask):
     @classmethod
     def task_type(cls):
         return "message"
+
+    @classmethod
+    def property_default(cls, properties):
+        return {
+            "message": "hello",
+            "channel": 0,
+            "post_interval": 1, # SECONDS
+            "post_number": 1
+        }
 
     def display(self, header):
         p = header.properties
