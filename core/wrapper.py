@@ -422,7 +422,7 @@ class JobManagement(commands.Cog):
     @commands.is_owner()
     async def cronflush(self, ctx):
         """Delete all schedules, and reset ID counter to 0. Bot owner only."""
-        for id, cron in self.jc.schedule.items():
+        for id, cron in list(self.jc.schedule.items()):
             await self.jc.delete_schedule(id)
 
         await self.core.config_db.get_common_config().aset("last_schedule_id", 0)
