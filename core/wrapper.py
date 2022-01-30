@@ -4,6 +4,7 @@ from discord.ext import commands
 from datetime import datetime
 import json
 import logging
+import time
 import typing
 
 from . import job
@@ -46,14 +47,15 @@ class CoreWrapper:
         self.jobqueue.on_job_submit(self._cfg_job_create)
         self.jobqueue.on_job_stop(self._cfg_job_delete)
         self.jobqueue.on_job_cancel(self._cfg_job_delete)
-        self.jobfactory = job.DiscordJobFactory(self.task_registry, self.bot)
+        self.jobfactory = DiscordJobFactory(self.task_registry, self.bot)
         self.jobtask = None
 
         # Job scheduler component
         self.jobcron = job.JobCron(self.jobqueue, self.jobfactory)
         self.jobcron.on_create_schedule(self._cfg_sched_create)
         self.jobcron.on_delete_schedule(self._cfg_sched_delete)
-        self.cronfactory = job.DiscordCronFactory(
+        self.cronfactory = DiscordCronFactory(
+            self.task_registry,
             self.config_db.get_common_config().opts["last_schedule_id"] + 1
         )
         self.crontask = None
@@ -197,12 +199,134 @@ class CoreWrapper:
         )
         await self.jobcron.create_schedule(chdr)
 
-        return chdr.id
+        return chdr
 
     # Register a task class.
     def task(self, tsk):
         return self.task_registry.register(tsk)
 
+    # Shortcut to get the config for a given command.
+    async def cfg(self, ctx):
+        cfg = await self.config_db.get_config(ctx.guild)
+        return cfg
+
+
+######################################
+# JOB INFRASTRUCTURE IMPLEMENTATIONS #
+######################################
+# Discord-specific aspects of core.job.
+
+# Implementation of discord-specific aspects of constructing job objects.
+class DiscordJobFactory(job.JobFactory):
+    def __init__(self, task_registry, bot):
+        super().__init__(task_registry)
+        self.bot = bot
+
+    # Create a new jobheader.
+    async def create_jobheader(self, ctx, properties, task_type, schedule_id):
+        header = job.JobHeader(
+            await self.next_id(),
+            task_type,
+            properties,
+            ctx.message.author.id,
+            ctx.guild.id,
+            int(time.time()),
+            schedule_id
+        )
+
+        return header
+
+    # Create a new job.
+    async def create_job(self, ctx, task_type, properties, schedule_id=None):
+        task_type = self.task_registry.force_str(task_type)
+        header = await self.create_jobheader(ctx, properties, task_type, schedule_id)
+        j = self.create_job_from_jobheader(header)
+        return j
+
+    # OVERRIDE
+    # Discord tasks take some extra constructor parameters, so we need to
+    # construct those jobs through the DiscordJobFactory.
+    def create_task(self, header, guild=None):
+        if guild is None:
+            guild = self.bot.get_guild(header.guild_id)
+
+        task_cls = self.task_registry.get(header.task_type)
+        task = task_cls(self.bot, guild)
+
+        return task
+
+
+# Compainion to the JobFactory. No core.job counterpart.
+class DiscordCronFactory:
+    def __init__(self, registry, start_id=0):
+        self.task_registry = registry
+        self.id_counter = job.AsyncAtomicCounter(start_id)
+
+    async def create_cronheader(self, ctx, properties, task_type, cron_str):
+        header = job.CronHeader(
+            await self.id_counter.get_and_increment(),
+            self.task_registry.force_str(task_type),
+            properties,
+            ctx.message.author.id,
+            ctx.guild.id,
+            cron_str
+        )
+
+        return header
+
+    async def create_cronheader_from_dict(self, header_dict):
+        return job.CronHeader.from_dict(header_dict)
+
+#################
+# DISCORD TASKS #
+#################
+# An assortment of JobTasks for Discord.
+
+# Task that sends a discord message on a timer to a given channel.
+class MessageTask(job.JobTask):
+    MAX_MSG_DISPLAY_LEN = 15
+
+    def __init__(self, bot, guild):
+        self.bot = bot
+        self.guild = guild
+
+    async def run(self, header):
+        p = header.properties
+        channel = self.guild.get_channel(p["channel"])
+
+        for _ in range(p["post_number"]):
+            await channel.send(p["message"])
+            await asyncio.sleep(p["post_interval"])
+
+    @classmethod
+    def task_type(cls):
+        return "message"
+
+    @classmethod
+    def property_default(cls, properties):
+        return {
+            "message": "hello",
+            "channel": 0,
+            "post_interval": 1, # SECONDS
+            "post_number": 1
+        }
+
+    def display(self, header):
+        p = header.properties
+        msg = p["message"]
+
+        if len(msg) > MessageTask.MAX_MSG_DISPLAY_LEN:
+            msg = msg[0:MessageTask.MAX_MSG_DISPLAY_LEN] + "..."
+
+        fmt = "message=\"{}\" post_interval={} post_number={}"
+
+        return fmt.format(msg, p["post_interval"], p["post_number"])
+
+########
+# COGS #
+########
+# Cogs for use with the core. Implements some generic management and debugging
+# behavior for administrators.
 
 # Optional cog containing job management commands for testing/administration
 # NOTE: This cog requires the Members intent.
@@ -435,7 +559,7 @@ class JobDebug(commands.Cog):
     async def testcronparse(self, ctx, cron: str):
         """Test parsing of cron strings."""
         try:
-            s_dict = core.job.cron_parse(cron)
+            s_dict = job.cron_parse(cron)
         except job.ScheduleParseException as e:
             await ctx.send("Could not parse cron str: " + str(e))
             return
@@ -451,7 +575,7 @@ class JobDebug(commands.Cog):
         YYYY-MM-DDThh:mm:ss
         """
         try:
-            if core.job.cron_match(cron, datetime.fromisoformat(date_time)):
+            if job.cron_match(cron, datetime.fromisoformat(date_time)):
                 await ctx.send("Schedule match.")
             else:
                 await ctx.send("No match.")
@@ -479,7 +603,7 @@ class JobDebug(commands.Cog):
             else:
                 date_time = datetime.fromisoformat(date_time)
 
-            s = core.job.cron_parse(cron)
+            s = job.cron_parse(cron)
         except job.ScheduleParseException as e:
             await ctx.send("Could not parse cron str: " + str(e))
             return
@@ -487,7 +611,7 @@ class JobDebug(commands.Cog):
             await ctx.send(str(e))
             return
 
-        next_date_time = core.job.cron_next_date_as_datetime(s, date_time)
+        next_date_time = job.cron_next_date_as_datetime(s, date_time)
 
         message  = "```\nFrom {}\n"
         message += "{} will next run\n"

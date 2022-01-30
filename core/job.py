@@ -801,63 +801,42 @@ class JobCron:
         ))
         await self.jobqueue.submit_job(job)
 
+##################
+# BUILT IN TASKS #
+##################
 
-# Implementation of discord-specific aspects of constructing job objects.
-class DiscordJobFactory(JobFactory):
-    def __init__(self, task_registry, bot):
-        super().__init__(task_registry)
-        self.bot = bot
+# A task that does nothing but sleep for a given time. Mostly used for
+# debugging purposes. For example, you can fill the job queue with BlockerTasks
+# that never end to test proper queue and cancellation behavior.
+class BlockerTask(JobTask):
+    # Ignore any arguments passed in to retain compatibility with all job
+    # factories.
+    def __init__(self, *args, **kwargs):
+        pass
 
-    # Create a new jobheader.
-    async def create_jobheader(self, ctx, properties, task_type, schedule_id):
-        header = JobHeader(
-            await self.next_id(),
-            task_type,
-            properties,
-            ctx.message.author.id,
-            ctx.guild.id,
-            int(time.time()),
-            schedule_id
-        )
+    @classmethod
+    def task_type(cls):
+        return "blocker"
 
-        return header
+    @classmethod
+    def property_default(cls, properties):
+        return {
+            "time": 60 # seconds. if None, loops forever.
+        }
 
-    # Create a new job.
-    async def create_job(self, ctx, task_type, properties, schedule_id=None):
-        task_type = self.task_registry.force_str(task_type)
-        header = await self.create_jobheader(ctx, properties, task_type, schedule_id)
-        j = self.create_job_from_jobheader(header)
-        return j
+    async def run(self, header):
+        p = header.properties
+        time = p["time"]
 
-    # OVERRIDE
-    # Discord tasks take some extra constructor parameters, so we need to
-    # construct those jobs through the DiscordJobFactory.
-    def create_task(self, header, guild=None):
-        if guild is None:
-            guild = self.bot.get_guild(header.guild_id)
+        if time is None:
+            while True: 
+                await asyncio.sleep(1)
+        else:
+            counter = time
 
-        task_cls = self.task_registry.get(header.task_type)
-        task = task_cls(self.bot, guild)
+            while counter > 0:
+                await asyncio.sleep(1)
+                counter -= 1
 
-        return task
-
-
-# Compainion to the JobFactory. No core.job counterpart.
-class DiscordCronFactory:
-    def __init__(self, start_id=0):
-        self.id_counter = AsyncAtomicCounter(start_id)
-
-    async def create_cronheader(self, ctx, properties, task_type, cron_str):
-        header = CronHeader(
-            await self.id_counter.get_and_increment(),
-            task_type,
-            properties,
-            ctx.message.author.id,
-            ctx.guild.id,
-            cron_str
-        )
-
-        return header
-
-    async def create_cronheader_from_dict(self, header_dict):
-        return CronHeader.from_dict(header_dict)
+    def display(self, header):
+        return ""

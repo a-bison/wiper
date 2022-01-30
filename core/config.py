@@ -225,7 +225,7 @@ class JsonConfig(AtomicConfigMixin, SubconfigMixin):
         if self.template is not None:
             self.opts = dict(self.template)
 
-        self.unsafe_write()
+        self.write()
 
     def clear(self):
         self.opts = {}

@@ -1,5 +1,7 @@
 from discord.ext import commands
 
+import json
+
 def check_administrator():
     async def predicate(ctx):
         return ctx.author.guild_permissions.administrator
@@ -33,3 +35,13 @@ async def process_user_optional(ctx, member, rest):
 # React with a check mark for confirmation
 async def ack(ctx):
     await ctx.message.add_reaction("\U00002705")
+
+
+def code(s):
+    return "```\n{}\n```".format(s)
+
+def codelns(lns):
+    return code("\n".join(lns))
+
+def codejson(j):
+    return code(json.dumps(j, indent=4))
