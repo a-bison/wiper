@@ -369,8 +369,7 @@ class JobManagement(commands.Cog):
         joblines = [self.pretty_print_job(ctx.guild, j) for j in jobs.values()]
 
         if joblines:
-            msg = "```\n{}\n```".format("\n".join(joblines))
-            await ctx.send(msg)
+            await ctx.send(util.codelns(joblines))
         else:
             await ctx.send("No jobs.")
 
@@ -380,10 +379,7 @@ class JobManagement(commands.Cog):
         jobs = self.get_guild_jobs(ctx.guild)
 
         if id in jobs:
-            raw = json.dumps(jobs[id].header.as_dict(), indent=4)
-            msg = "```\n{}\n```".format(raw)
-
-            await ctx.send(msg)
+            await ctx.send(util.codejson(jobs[id].header.as_dict()))
         else:
             await ctx.send("Job {} does not exist.".format(id))
 
@@ -481,8 +477,7 @@ class JobManagement(commands.Cog):
         cronlines = [self.pretty_print_cron(cron) for cron in crons.values()]
 
         if cronlines:
-            msg = "```\n{}\n```".format("\n".join(cronlines))
-            await ctx.send(msg)
+            await ctx.send(util.codelns(cronlines))
         else:
             await ctx.send("Nothing scheduled.")
 
@@ -598,8 +593,7 @@ class JobDebug(commands.Cog):
             await ctx.send("Could not parse cron str: " + str(e))
             return
 
-        s = json.dumps(s_dict, indent=4)
-        await ctx.send("```\n{}\n```".format(s))
+        await ctx.send(util.codejson(s_dict))
 
     @commands.command()
     async def testcronmatch(self, ctx, cron:str, date_time:str):
@@ -647,9 +641,11 @@ class JobDebug(commands.Cog):
 
         next_date_time = job.cron_next_date_as_datetime(s, date_time)
 
-        message  = "```\nFrom {}\n"
-        message += "{} will next run\n"
-        message += "     {}\n```"
+        message = util.codelns([
+            "From {}",
+            "{} will next run",
+            "     {}"
+        ])
 
         await ctx.send(message.format(
             date_time.strftime("%c"),
