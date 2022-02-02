@@ -364,7 +364,6 @@ class Wiping(commands.Cog):
             await ctx.send("Wipe job started. ID is {}.".format(job.header.id))
 
     @commands.command()
-    @commands.is_owner()
     async def wipelater(self, ctx,
             schedule: str,
             channels: typing.Optional[str],
@@ -372,8 +371,6 @@ class Wiping(commands.Cog):
             members: typing.Optional[str]):
         """Schedule a wipe job to occur at a regular interval.
         
-        This command is temporarily owner only.
-
         schedule - A cron-format string that specifies the schedule.
 
         channels - Channel specifier. Can be "all", or a list of channels
