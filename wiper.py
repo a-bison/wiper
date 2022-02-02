@@ -19,9 +19,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Invite: https://discord.com/oauth2/authorize?scope=applications.commands%20bot&permissions=120259160128&client_id=895670115515904000
 
-MAX_BULK_DELETE_MESSAGES = 100
 DELETE_DELAY = 1.5
-MAX_JOBS = 4
 
 DEFAULT_CONFIG_DIR = Path("configdb")
 DEFAULT_SECRET = "REPLACE WITH API TOKEN"
@@ -31,6 +29,8 @@ STARTUP_CONFIG_TEMPLATE = {
     "secret": "REPLACE WITH API TOKEN",
     "config_dir": str(DEFAULT_CONFIG_DIR)
 }
+
+ENABLE_DEBUG_COMMANDS = False
 
 # TODO: Add backups of the config directory to protect against errors in
 # config writing code.
@@ -67,9 +67,11 @@ class Wiper:
         # Discord bot init
         self.bot.event(self.on_command_error)
         self.bot.add_cog(core.wrapper.JobManagement(self.core))
-        self.bot.add_cog(core.wrapper.JobDebug())
-        self.bot.add_cog(Debug(self.core))
         self.bot.add_cog(Wiping(self.core))
+
+        if ENABLE_DEBUG_COMMANDS:
+            self.bot.add_cog(core.wrapper.JobDebug())
+            self.bot.add_cog(Debug(self.core))
 
     def run(self):
         self.core.run(self.secret)
@@ -285,7 +287,7 @@ class Wiping(commands.Cog):
 
         return True
 
-    @commands.command()
+    @commands.command(enabled=ENABLE_DEBUG_COMMANDS)
     @commands.is_owner()
     async def wipepermissiontest(self, ctx,
             channels: typing.Optional[str],
@@ -309,7 +311,7 @@ class Wiping(commands.Cog):
 
         await ctx.send(util.codejson(properties))
 
-    @commands.command()
+    @commands.command(enabled=ENABLE_DEBUG_COMMANDS)
     @commands.is_owner()
     async def wipeparsetest(self, ctx,
             channels: typing.Optional[str],
