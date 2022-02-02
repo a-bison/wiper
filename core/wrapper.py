@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 
 from datetime import datetime
+from functools import wraps
+import inspect
 import json
 import logging
 import time
@@ -472,15 +474,10 @@ class JobManagement(commands.Cog):
 
         return s
 
-    # Get schedule for a given guild.
-    def get_guild_sched(self, guild):
-        return {id: c for id, c in self.jc.schedule.items()
-                if c.guild_id == guild.id}
-
     @commands.command()
     async def cronlist(self, ctx):
         """List scheduled jobs."""
-        crons = self.get_guild_sched(ctx.guild)
+        crons = self.jc.sched_filter(guild_id=ctx.guild.id)
         cronlines = [self.pretty_print_cron(cron) for cron in crons.values()]
 
         if cronlines:
@@ -488,19 +485,6 @@ class JobManagement(commands.Cog):
             await ctx.send(msg)
         else:
             await ctx.send("Nothing scheduled.")
-
-    @commands.command()
-    async def cronraw(self, ctx, id: int):
-        """Print the internal representation of a schedule. Mostly for debugging."""
-        crons = self.get_guild_sched(ctx.guild)
-
-        if id in crons:
-            raw = json.dumps(crons[id].as_dict(), indent=4)
-            msg = "```\n{}\n```".format(raw)
-
-            await ctx.send(msg)
-        else:
-            await ctx.send("Schedule {} does not exist.".format(id))
 
     @commands.command()
     @commands.is_owner()
@@ -525,28 +509,78 @@ class JobManagement(commands.Cog):
 
         except job.ScheduleParseException as e:
             msg = "Could not parse cron str \"{}\": {}"
-            await ctx.send(msg.format(cronstr, str(e)))
+            await ctx.send(msg.format(e.cronstr, str(e)))
+    
+    # Run a generic cron cmd.
+    async def _run_croncmd(self, coro, ctx, cron_id, *args, require_ownership=False):
+        crons = self.jc.sched_filter(guild_id=ctx.guild.id)
+
+        if cron_id in crons:
+            if (require_ownership and
+                not ctx.author.guild_permissions.administrator and
+                cron.owner_id != ctx.member.id):
+                raise NotAdministrator("force run schedules created by other users")
+            
+            try:
+                # If a method is supplied, no need to feed in self
+                if inspect.ismethod(coro):
+                    await coro(ctx, crons[cron_id], *args)
+                else:
+                    await coro(self, ctx, crons[cron_id], *args)
+            except job.ScheduleParseException as e:
+                # Catch any schedule parse exceptions that might happen
+                msg = "Could not parse cron str \"{}\": {}"
+                await ctx.send(msg.format(e.cronstr, str(e)))
+        else:
+            await ctx.send("Schedule {} does not exist.".format(cron_id))
+
+    # A command that operates on a single schedule entry by ID.
+    # coro must be coro(self, ctx, cron)
+    def _croncmd(**run_croncmd_args):
+        def decorator(coro):
+            @util.command_wraps(coro)
+            async def run(self, ctx, id: int):
+                await self._run_croncmd(coro, ctx, id, **run_croncmd_args)
+
+            return run
+        
+        return decorator
+
+    @_croncmd()
+    async def cronraw(self, ctx, cron):
+        """Print the internal representation of a schedule."""
+        await ctx.send(util.codejson(cron.as_dict()))
+
+    @_croncmd(require_ownership=True)
+    async def crondelete(self, ctx, cron):
+        """Delete a schedule."""
+        await self.jc.delete_schedule(cron.id)
+        await ack(ctx)
+
+    @_croncmd(require_ownership=True)
+    async def cronforce(self, ctx, cron):
+        """Force a scheduled job to run immediately."""
+        await self.jc.run_now(cron.id)
+        await ack(ctx)
+
+    # TODO: Find a more compact way to express cron cmds that take extra
+    # arguments
+    async def _cronreschedule(self, ctx, cron, cronstr):
+        await self.jc.reschedule(cron.id, cronstr)
+        await ack(ctx)
 
     @commands.command()
-    async def crondelete(self, ctx, id: int):
-        """Delete a schedule."""
-        crons = self.get_guild_sched(ctx.guild)
-
-        if id in crons:
-            if (not ctx.author.guild_permissions.administrator and
-                crons[id].owner_id != ctx.member.id):
-                raise NotAdministrator("delete schedules created by other users")
-
-            await self.jc.delete_schedule(id)
-            await ack(ctx)
-        else:
-            await ctx.send("Schedule {} does not exist.".format(id))
+    async def cronreschedule(self, ctx, id: int, cronstr: str):
+        """Reschedule a cron job."""
+        await self._run_croncmd(
+            self._cronreschedule, ctx, id, cronstr, require_ownership=True
+        )
 
     @commands.command()
     @commands.is_owner()
     async def cronflush(self, ctx):
         """Delete all schedules, and reset ID counter to 0. Bot owner only."""
-        for id, cron in list(self.jc.schedule.items()):
+        for id, cron in self.jc.sched_copy():
             await self.jc.delete_schedule(id)
 
         await self.core.config_db.get_common_config().aset("last_schedule_id", 0)

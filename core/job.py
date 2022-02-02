@@ -440,9 +440,26 @@ class CronHeader:
         # See cron_next_date() for more details.
         self.next = cron_next_date_as_datetime(sched_obj, carry=1)
 
+    def match(self, **kwargs):
+        d = self.as_dict()
+
+        for key, value in kwargs.items():
+            if key not in d:
+                raise TypeError("Cannot use {} in CronHeader.match".format(
+                    key
+                ))
+
+            if d[key] != value:
+                return False
+
+        return True
+
 
 class ScheduleParseException(Exception):
-    pass
+    def __init__(self, *args, cronstr=None):
+        super().__init__(*args)
+
+        self.cronstr = cronstr
 
 
 # Parse a schedule string into a dictionary.
@@ -458,9 +475,9 @@ def cron_parse(schedule_str):
     s_dict = {}
 
     if len(s_split) < 5:
-        raise ScheduleParseException("less than 5 elements")
+        raise ScheduleParseException("less than 5 elements", cronstr=schedule_str)
     elif len(s_split) > 5:
-        raise ScheduleParseException("more than 5 elements")
+        raise ScheduleParseException("more than 5 elements", cronstr=schedule_str)
 
     for limit, name, elem, i in zip(SCHED_PARSE_LIMITS, SCHED_PARSE_POSITIONS, s_split, range(5)):
         lower, upper = limit
@@ -476,7 +493,10 @@ def cron_parse(schedule_str):
                 result = SCHED_WD_NAMES[elem.lower()]
             else:
                 msg = "position {}({}): {} is not an integer"
-                raise ScheduleParseException(msg.format(i, name, elem))
+                raise ScheduleParseException(
+                    msg.format(i, name, elem),
+                    cronstr=schedule_str
+                )
 
 
         s_dict[name] = result
@@ -755,6 +775,25 @@ class JobCron:
 
             del self.schedule[id]
 
+    # Replace a schedule entry with a new one.
+    async def replace_schedule(self, id, sheader):
+        async with self.schedule_lock:
+            old_hdr = self.schedule[id]
+
+            new_hdr = sheader
+            new_hdr.next = None
+            new_hdr.update_next()
+
+            # Call both delete and create callbacks to ensure any
+            # external state is updated properly
+            if self.sched_delete_callback is not None:
+                await self.sched_delete_callback(old_hdr)
+
+            if self.sched_create_callback is not None:
+                await self.sched_create_callback(new_hdr)
+
+            self.schedule[id] = new_hdr
+
     # Schedule a job.
     async def create_schedule(self, sheader):
         async with self.schedule_lock:
@@ -800,6 +839,31 @@ class JobCron:
             cron_header.id, job.header.task_type, job.task.display(job.header)
         ))
         await self.jobqueue.submit_job(job)
+
+        return job
+
+    # Run a scheduled job immediately, returning the resulting job.
+    async def run_now(self, id):
+        hdr = self.schedule[id]
+        return await self._start_scheduled_job(hdr)
+
+    # Returns a copy of the schedule, filtered by the given parameters.
+    def sched_filter(self, **kwargs):
+        return {id: c for id, c in self.schedule.items()
+                if c.match(**kwargs)}
+
+    # Returns a copy of the schedule.
+    def sched_copy(self):
+        return dict(self.schedule)
+
+    # Reschedule a schedule entry.
+    async def reschedule(self, id, cronstr):
+        hdr = self.schedule[id]
+        
+        new_hdr = copy.deepcopy(hdr)
+        new_hdr.schedule = cronstr
+
+        await self.replace_schedule(id, new_hdr)
 
 ##################
 # BUILT IN TASKS #
