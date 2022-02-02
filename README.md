@@ -27,7 +27,9 @@ it into startup.json:
 }
 ```
 
-Then, rerun the bot, and you're good to go.
+Wiper requires the use of the [GUILD_MEMBERS intent](https://discordpy.readthedocs.io/en/stable/intents.html).
+
+Once your bot user is set up, rerun `wiper.py`, and you're good to go.
 
 # Features
 
