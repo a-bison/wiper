@@ -614,7 +614,7 @@ def main():
 
     if startup_cfg.opts["secret"] == DEFAULT_SECRET:
         logging.error("Please open {} and replace the secret with a proper API token.".format(STARTUP_CONFIG_LOCATION))
-        logging.error("For more information, see https://www.writebots.com/discord-bot-token/")
+        logging.error("For more information, see https://discordpy.readthedocs.io/en/stable/discord.html")
         return
 
     wiper = Wiper(secret=startup_cfg.opts["secret"],
