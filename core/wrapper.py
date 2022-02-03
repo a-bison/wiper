@@ -263,11 +263,11 @@ class DiscordJobFactory(job.JobFactory):
 class DiscordCronFactory:
     def __init__(self, registry, start_id=0):
         self.task_registry = registry
-        self.id_counter = job.AsyncAtomicCounter(start_id)
+        self.id_counter = job.CountingIdGenerator(start_id)
 
     async def create_cronheader(self, ctx, properties, task_type, cron_str):
         header = job.CronHeader(
-            await self.id_counter.get_and_increment(),
+            self.id_counter.next_id(),
             self.task_registry.force_str(task_type),
             properties,
             ctx.message.author.id,

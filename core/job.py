@@ -18,25 +18,20 @@ import time
 # UTILS #
 #########
 
-# Utility class for getting and incrementing an id atomically.
-class AsyncAtomicCounter:
+class CountingIdGenerator:
     def __init__(self, start_count=0):
         self.count = start_count
-        self.lock = asyncio.Lock()
 
-    async def get_and_increment(self):
-        async with self.lock:
-            return self.get_and_increment_unsafe()
-
-    def get_and_increment_unsafe(self):
+    def next_id(self):
         n = self.count
         self.count += 1
+
         return n
+
 
 ############
 # JOB BASE #
 ############
-
 
 # Container class for job information. Primary data class for this module.
 class Job:
@@ -140,24 +135,24 @@ class JobHeader:
 # Base JobFactory functionality.
 class JobFactory(ABC):
     def __init__(self, task_registry):
-        self.id_counter = AsyncAtomicCounter()
+        self.id_counter = CountingIdGenerator()
         self.task_registry = task_registry
 
     # Get the next available job ID.
-    async def next_id(self):
-        return await self.id_counter.get_and_increment()
+    def next_id(self):
+        return self.id_counter.next_id()
 
     # Create a jobheader from a schedule entry
     async def create_jobheader_from_cron(self, cron):
         return cron.as_jobheader(
-            await self.next_id(),
+            self.next_id(),
             int(time.time())
         )
 
     # Create a jobheader from an existing dictionary
     async def create_jobheader_from_dict(self, header):
         return JobHeader.from_dict(
-            await self.next_id(),
+            self.next_id(),
             header
         )
 
