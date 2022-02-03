@@ -13,6 +13,7 @@ import core.util as util
 import core.wrapper
 from core.exception import NotAdministrator
 from core.util import ack
+from core.wrapper import ConfigCogBase
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,7 +42,7 @@ class Wiper:
         self.intents.members = True
 
         self.secret = secret
-        self.bot = commands.Bot(command_prefix="w!",
+        self.bot = commands.Bot(command_prefix=self.get_command_prefix,
                                 case_insensitive=True,
                                 intents=self.intents,
                                 description=(
@@ -49,7 +50,8 @@ class Wiper:
                                     "from discord servers."))
 
         self.cfgtemplate = {
-            "default_post_age": 7  # days
+            "default_post_age": 7,  # days
+            "command_prefix": "w!"
         }
         self.common_cfgtemplate = {}
 
@@ -68,6 +70,7 @@ class Wiper:
         self.bot.event(self.on_command_error)
         self.bot.add_cog(core.wrapper.JobManagement(self.core))
         self.bot.add_cog(Wiping(self.core))
+        self.bot.add_cog(Config(self.core))
 
         if ENABLE_DEBUG_COMMANDS:
             self.bot.add_cog(core.wrapper.JobDebug())
@@ -75,6 +78,10 @@ class Wiper:
 
     def run(self):
         self.core.run(self.secret)
+
+    async def get_command_prefix(self, bot, message):
+        cfg = await self.core.cfg(message)
+        return await cfg.aget("command_prefix")
 
     async def on_command_error(self, ctx, error):
         # If it's a generic command invoke error, use the cause exception.
@@ -547,23 +554,16 @@ class WipeTask(core.job.JobTask):
         await owner.send(msg)
 
 
-class Config(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.cdb = bot.config_db
+class Config(ConfigCogBase):
+    @ConfigCogBase.cfg_command(aliases=["prefix", "pref"])
+    async def command_prefix(*_):
+        """Set/get the command prefix for the current server."""
+        pass
 
-    @commands.command(name="default-post-age")
-    @commands.is_owner()
-    async def default_post_age(self, ctx, age: typing.Optional[int]):
-        cfg = await self.cdb.get_config(ctx.guild)
-
-        if age is None:
-            age = await cfg.aget("default_post_age")
-            await ctx.reply("Default post age is {}.".format(age))
-            return
-
-        await cfg.aset("default_post_age", age)
-        await ack(ctx)
+    @ConfigCogBase.cfg_command(int)
+    async def default_post_age(*_):
+        """Set/get the default delete age for wipe jobs, in days."""
+        pass
 
 
 class Debug(commands.Cog):

@@ -209,6 +209,7 @@ class CoreWrapper:
         return self.task_registry.register(tsk)
 
     # Shortcut to get the config for a given command.
+    # Also supports messages.
     async def cfg(self, ctx):
         cfg = await self.config_db.get_config(ctx.guild)
         return cfg
@@ -662,3 +663,65 @@ class JobDebug(commands.Cog):
             cron,
             next_date_time.strftime("%c")
         ))
+
+
+class ConfigCogBase(commands.Cog):
+    def __init__(self, core):
+        self.core = core
+
+    # Decorator for creating a simple config command that sets/gets
+    # one config option. For example:
+    #
+    # @ConfigCogBase.cfg_command()
+    # async def config_option_name(*_):
+    #     pass
+    #
+    # Would produce a command called "config-option-name", where
+    #
+    # "w!config-option-name" gets the config "config_option_name" and prints it.
+    # "w!config-option-name value" sets the config to "value".
+    #
+    # The body of the function is called immediately before the value
+    # is set, so it may be used for additional validation/processing.
+    @staticmethod
+    def cfg_command(
+            converter=None,
+            cfg_key=None,
+            require_admin=True,
+            **kwargs):
+
+        def decorator(coro):
+            if "name" not in kwargs:
+                kwargs["name"] = coro.__name__.replace("_", "-")
+
+            @util.command_wraps(coro, **kwargs)
+            async def go(self, ctx, value: typing.Optional[str]):
+                cfg = await self.core.cfg(ctx)
+
+                if cfg_key is None:
+                    key = coro.__name__
+                else:
+                    key = cfg_key
+
+                # GET
+                if value is None:
+                    display_name = key.replace("_", " ").capitalize()
+                    value = await cfg.aget(key)
+                    await ctx.reply("{} is {}.".format(display_name, value))
+                    return
+
+                # SET
+                if require_admin and not ctx.author.guild_permissions.administrator:
+                    await ctx.reply("You must be administrator to set this value.")
+                    return
+
+                if converter is not None:
+                    value = converter(value)
+
+                await coro(self, ctx, cfg, key, value)
+                await cfg.aset(key, value)
+                await ack(ctx)
+
+            return go
+
+        return decorator
