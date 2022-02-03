@@ -4,7 +4,6 @@ from discord.ext import commands
 from datetime import datetime, timedelta
 from pathlib import Path
 import asyncio
-import json
 import logging
 import typing
 
@@ -32,6 +31,7 @@ STARTUP_CONFIG_TEMPLATE = {
 
 ENABLE_DEBUG_COMMANDS = False
 
+
 # TODO: Add backups of the config directory to protect against errors in
 # config writing code.
 
@@ -49,7 +49,7 @@ class Wiper:
                                     "from discord servers."))
 
         self.cfgtemplate = {
-            "default_post_age": 7 # days
+            "default_post_age": 7  # days
         }
         self.common_cfgtemplate = {}
 
@@ -93,19 +93,10 @@ class Wiper:
             raise error
 
 
-# Delete everything in the given channel before date_time
-async def wipe(channel, date_time):
-    msgcount = 0
-
-    async for message in channel.history(limit=None, before=date_time):
-        msgcount += 1
-        await asyncio.sleep(DELETE_DELAY)
-        await message.delete()
-
-    return msgcount
-
-
-def older_than(**args):
+# Shorthand function for getting a date a given number of time units before now.
+# Example:
+#   one_week_ago = now_minus(days=7)
+def now_minus(**args):
     return datetime.now() - timedelta(**args)
 
 
@@ -182,7 +173,7 @@ class Wiping(commands.Cog):
     # Also, check permissions.
     async def parse_wipe_args(self, ctx, channels, older_than, members):
         # Channel
-        if channels == None:
+        if channels is None:
             channels_tuple = [ctx.channel], []
         else:
             channels_tuple = await self.parse_channel_list(ctx, channels)
@@ -192,7 +183,7 @@ class Wiping(commands.Cog):
         wipe_channels, except_channels = channels_tuple
 
         # Members
-        if members == None:
+        if members is None:
             members_tuple = [ctx.author], []
         else:
             members_tuple = await self.parse_member_list(ctx, members)
@@ -229,12 +220,15 @@ class Wiping(commands.Cog):
 
         # Silently ignore channels that can't be read.
         if not perms.read_messages:
-            logging.error("test")
             return False
 
-        if (not isinstance(members, str) and
+        wipe_deletes_only_owner_messages = (
+            not isinstance(members, str) and
             len(members) == 1 and
-            members[0] == owner.id):
+            members[0] == owner.id
+        )
+
+        if wipe_deletes_only_owner_messages:
             # If members specifies a single user id that matches the owner,
             # allow deletion if the user can read this channel.
             return True
@@ -281,7 +275,7 @@ class Wiping(commands.Cog):
             ))
             return False
         
-        if wipe_properties["channels"] == []:
+        if not wipe_properties["channels"]:
             await ctx.send("No channels specified.")
             return False
 
@@ -289,7 +283,9 @@ class Wiping(commands.Cog):
 
     @commands.command(enabled=ENABLE_DEBUG_COMMANDS)
     @commands.is_owner()
-    async def wipepermissiontest(self, ctx,
+    async def wipepermissiontest(
+            self,
+            ctx,
             channels: typing.Optional[str],
             older_than: typing.Optional[int],
             members: typing.Optional[str],
@@ -313,7 +309,9 @@ class Wiping(commands.Cog):
 
     @commands.command(enabled=ENABLE_DEBUG_COMMANDS)
     @commands.is_owner()
-    async def wipeparsetest(self, ctx,
+    async def wipeparsetest(
+            self,
+            ctx,
             channels: typing.Optional[str],
             older_than: typing.Optional[int],
             members: typing.Optional[str]):
@@ -325,7 +323,9 @@ class Wiping(commands.Cog):
         await ctx.send(util.codejson(properties))
 
     @commands.command()
-    async def wipenow(self, ctx,
+    async def wipenow(
+            self,
+            ctx,
             channels: typing.Optional[str],
             older_than: typing.Optional[int],
             members: typing.Optional[str]):
@@ -339,7 +339,7 @@ class Wiping(commands.Cog):
                    "all" - wipe everything
 
                    In general, a channel may be deleted by specifying its name
-                   in the comma-separated list. If a channel has a - in front
+                   in the comma-separated list. If a channel has a "-" in front
                    of it, it will be added as an exception and will not be
                    wiped.
 
@@ -364,7 +364,9 @@ class Wiping(commands.Cog):
             await ctx.send("Wipe job started. ID is {}.".format(job.header.id))
 
     @commands.command()
-    async def wipelater(self, ctx,
+    async def wipelater(
+            self,
+            ctx,
             schedule: str,
             channels: typing.Optional[str],
             older_than: typing.Optional[int],
@@ -381,7 +383,7 @@ class Wiping(commands.Cog):
                    "all" - wipe everything
 
                    In general, a channel may be deleted by specifying its name
-                   in the comma-separated list. If a channel has a - in front
+                   in the comma-separated list. If a channel has a "-" in front
                    of it, it will be added as an exception and will not be
                    wiped.
 
@@ -480,10 +482,10 @@ class WipeTask(core.job.JobTask):
     # Determine whether a message should be deleted based on msg and properties
     # dict.
     def match_msg(self, p, msg):
-        return include_msg(p, msg) and not exclude_msg(p, msg)
+        return self.include_msg(p, msg) and not self.exclude_msg(p, msg)
 
     # Delete history of a single channel. Returns number of messages deleted.
-    async def wipe_channel(self, p, channel, datetime):
+    async def wipe_channel(self, channel, datetime):
         msgcount = 0
 
         async for message in channel.history(limit=None, before=datetime):
@@ -505,12 +507,11 @@ class WipeTask(core.job.JobTask):
     # in a channel, and there's nothing to do, mark that channel as complete.
     # The wipe job is complete when there is nothing to delete across all
     # channels.
-    async def wipe_cycle(self, header, channels, datetime):
-        p = header.properties
+    async def wipe_cycle(self, channels, datetime):
         complete_channels = {}
 
         for channel in channels.values():
-            msgs_deleted = await self.wipe_channel(p, channel, datetime)
+            msgs_deleted = await self.wipe_channel(channel, datetime)
             if msgs_deleted == 0:
                 complete_channels[channel.id] = channel
 
@@ -523,12 +524,12 @@ class WipeTask(core.job.JobTask):
 
     async def run(self, header):
         p = header.properties
-        date_time = older_than(days=p["olderthan"])
+        date_time = now_minus(days=p["olderthan"])
         completed_channels = {}
 
         channels = self.get_delete_channels(p)
         while self.more_to_delete(completed_channels, channels):
-            complete = await self.wipe_cycle(header, channels, date_time)
+            complete = await self.wipe_cycle(channels, date_time)
             completed_channels.update(complete)
             channels = self.get_delete_channels(p)
 
@@ -583,12 +584,12 @@ class Debug(commands.Cog):
         }
 
         logging.info("MessageJob: " + str(properties))
-        await self.core.start_job(ctx, MessageTask, properties)
+        await self.core.start_job(ctx, core.wrapper.MessageTask, properties)
         await ack(ctx)
 
     @commands.command()
     async def blockerjob(self, ctx):
-        await self.core.start_job(ctx, BlockerTask, {})
+        await self.core.start_job(ctx, core.job.BlockerTask, {})
         await ack(ctx)
 
     @commands.command()

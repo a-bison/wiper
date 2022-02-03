@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 
 from datetime import datetime
-from functools import wraps
+import asyncio
 import inspect
 import json
 import logging
@@ -14,6 +14,7 @@ from . import config
 from . import util
 from .exception import NotAdministrator
 from .util import ack
+
 
 # High level interface to the bot core.
 # Automatically links together cfg and job systems, and subscribes to
@@ -30,7 +31,7 @@ class CoreWrapper:
 
         self.common_cfgtemplate = dict(common_cfgtemplate)
         self.common_cfgtemplate.update({
-            # save the last schedule id so we don't overlap new schedules
+            # save the last schedule id, so we don't overlap new schedules
             # with old ones
             "last_schedule_id": 0
         })
@@ -44,7 +45,7 @@ class CoreWrapper:
         # Task registry
         self.task_registry = job.TaskRegistry()
 
-        # Job executer/consumer component
+        # Job executor/consumer component
         self.jobqueue = job.JobQueue(self.bot.loop)
         self.jobqueue.on_job_submit(self._cfg_job_create)
         self.jobqueue.on_job_stop(self._cfg_job_delete)
@@ -248,7 +249,7 @@ class DiscordJobFactory(job.JobFactory):
     # OVERRIDE
     # Discord tasks take some extra constructor parameters, so we need to
     # construct those jobs through the DiscordJobFactory.
-    def create_task(self, header, guild=None):
+    async def create_task(self, header, guild=None):
         if guild is None:
             guild = self.bot.get_guild(header.guild_id)
 
@@ -258,7 +259,7 @@ class DiscordJobFactory(job.JobFactory):
         return task
 
 
-# Compainion to the JobFactory. No core.job counterpart.
+# Companion to the JobFactory. No core.job counterpart.
 class DiscordCronFactory:
     def __init__(self, registry, start_id=0):
         self.task_registry = registry
@@ -278,6 +279,7 @@ class DiscordCronFactory:
 
     async def create_cronheader_from_dict(self, header_dict):
         return job.CronHeader.from_dict(header_dict)
+
 
 #################
 # DISCORD TASKS #
@@ -309,7 +311,7 @@ class MessageTask(job.JobTask):
         return {
             "message": "hello",
             "channel": 0,
-            "post_interval": 1, # SECONDS
+            "post_interval": 1,  # SECONDS
             "post_number": 1
         }
 
@@ -323,6 +325,7 @@ class MessageTask(job.JobTask):
         fmt = "message=\"{}\" post_interval={} post_number={}"
 
         return fmt.format(msg, p["post_interval"], p["post_number"])
+
 
 ########
 # COGS #
@@ -341,7 +344,7 @@ class JobManagement(commands.Cog):
         self.jc = core.jobcron
         self.registry = core.task_registry
 
-    def pretty_print_job(self, guild, job):
+    def pretty_print_job(self, job):
         h = job.header
         owner = self.bot.get_user(h.owner_id).name
         s = "{}: owner={} type={}".format(h.id, owner, h.task_type)
@@ -361,12 +364,18 @@ class JobManagement(commands.Cog):
         return {id: j for id, j in self.jq.jobs.items()
                 if j.header.guild_id == guild.id}
 
+    def job_can_modify(self, ctx, owner_id):
+        return (
+            ctx.author.guild_permissions.administrator or
+            owner_id == ctx.author.id
+        )
+
     # List jobs for a given guild.
     @commands.command()
     async def joblist(self, ctx):
         """List enqueued jobs."""
         jobs = self.get_guild_jobs(ctx.guild)
-        joblines = [self.pretty_print_job(ctx.guild, j) for j in jobs.values()]
+        joblines = [self.pretty_print_job(j) for j in jobs.values()]
 
         if joblines:
             await ctx.send(util.codelns(joblines))
@@ -393,8 +402,7 @@ class JobManagement(commands.Cog):
         jobs = self.get_guild_jobs(ctx.guild)
 
         if id in jobs:
-            if (not ctx.author.guild_permissions.administrator and
-                jobs[id].header.owner_id != ctx.member.id):
+            if self.job_can_modify(ctx, jobs[id].header.owner_id):
                 raise NotAdministrator("cancel jobs started by other users")
 
             await self.jq.canceljob(id)
@@ -414,10 +422,8 @@ class JobManagement(commands.Cog):
         if corrected_user is None:
             return
 
-        if (not ctx.author.guild_permissions.administrator and
-            corrected_user.id != ctx.member.id):
+        if self.job_can_modify(ctx, corrected_user.id):
             raise NotAdministrator("cancel jobs started by other users")
-            return
 
         jobs = [j for _, j in self.get_guild_jobs(ctx.guild).items()
                 if j.header.owner_id == corrected_user.id]
@@ -450,7 +456,7 @@ class JobManagement(commands.Cog):
 
         You must be the owner of the bot to use this command.
         """
-        for id, job in reversed(self.jq.jobs.items()):
+        for id in reversed(self.jq.jobs.keys()):
             await self.jq.canceljob(id)
 
         await ack(ctx)
@@ -511,17 +517,22 @@ class JobManagement(commands.Cog):
         crons = self.jc.sched_filter(guild_id=ctx.guild.id)
 
         if cron_id in crons:
-            if (require_ownership and
-                not ctx.author.guild_permissions.administrator and
-                cron.owner_id != ctx.member.id):
+            cron = crons[cron_id]
+
+            cron_can_modify = (
+                ctx.author.guild_permissions.administrator or
+                cron.owner_id == ctx.member.id
+            )
+
+            if require_ownership and not cron_can_modify:
                 raise NotAdministrator("force run schedules created by other users")
             
             try:
                 # If a method is supplied, no need to feed in self
                 if inspect.ismethod(coro):
-                    await coro(ctx, crons[cron_id], *args)
+                    await coro(ctx, cron, *args)
                 else:
-                    await coro(self, ctx, crons[cron_id], *args)
+                    await coro(self, ctx, cron, *args)
             except job.ScheduleParseException as e:
                 # Catch any schedule parse exceptions that might happen
                 msg = "Could not parse cron str \"{}\": {}"
@@ -596,7 +607,7 @@ class JobDebug(commands.Cog):
         await ctx.send(util.codejson(s_dict))
 
     @commands.command()
-    async def testcronmatch(self, ctx, cron:str, date_time:str):
+    async def testcronmatch(self, ctx, cron: str, date_time: str):
         """Test matching a cron string to a date.
 
         Date must be provided in ISO format:
@@ -615,9 +626,8 @@ class JobDebug(commands.Cog):
             await ctx.send(str(e))
             return
 
-
     @commands.command()
-    async def testcronnext(self, ctx, cron:str, date_time: typing.Optional[str]):
+    async def testcronnext(self, ctx, cron: str, date_time: typing.Optional[str]):
         """Test functionality to predict next run of a cron schedule.
 
         Date must be provided in ISO format:

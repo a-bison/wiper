@@ -4,15 +4,15 @@
 #
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, MINYEAR, MAXYEAR
 import asyncio
 import calendar
 import collections
 import copy
 import functools
-import json
 import logging
 import time
+
 
 #########
 # UTILS #
@@ -51,7 +51,7 @@ class Job:
 
     # Wait for this job to finish.
     async def wait(self):
-        await event.wait()
+        await self.complete_event.wait()
 
 
 # Task base class. Subclass this to create your own Tasks.
@@ -87,9 +87,9 @@ class JobTask(ABC):
 # Metadata for tracking a job, for scheduling and persistence purposes.
 class JobHeader:
     @classmethod
-    def from_dict(self, id, d):
+    def from_dict(cls, id, d):
         return JobHeader(
-            id, # ignore loaded id
+            id,  # ignore loaded id
             d["task_type"],
             d["properties"],
             d["owner_id"],
@@ -162,8 +162,8 @@ class JobFactory(ABC):
         )
 
     # Create a job using just the header.
-    def create_job_from_jobheader(self, header):
-        task = self.create_task(header)
+    async def create_job_from_jobheader(self, header):
+        task = await self.create_task(header)
         j = Job(header, task)
 
         # Update header.properties with declared task defaults, if any.
@@ -178,12 +178,12 @@ class JobFactory(ABC):
     # Create a job from a schedule entry
     async def create_job_from_cron(self, cron):
         header = await self.create_jobheader_from_cron(cron)
-        return self.create_job_from_jobheader(header)
+        return await self.create_job_from_jobheader(header)
 
     # Create a job from an existing dictionary (typically loaded from cfg)
     async def create_job_from_dict(self, header):
         header = await self.create_jobheader_from_dict(header)
-        return self.create_job_from_jobheader(header)
+        return await self.create_job_from_jobheader(header)
 
     # Create a new task using a jobheader.
     @abstractmethod
@@ -316,9 +316,8 @@ class JobQueue:
         if self.job_stop_callback:
             await self.job_stop_callback(j.header)
 
-
     async def canceljob(self, job):
-        if isinstance(job, JobTask):
+        if isinstance(job, Job):
             job = job.header.id
 
         self.jobs[job].header.cancel = True
@@ -330,6 +329,7 @@ class JobQueue:
             await self.job_cancel_callback(self.jobs[job].header)
 
         del self.jobs[job]
+
 
 ##################
 # JOB SCHEDULING #
@@ -366,10 +366,11 @@ SCHED_MACROS = {
     "!daily": "* * *"
 }
 
+
 # Main scheduling data class.
 class CronHeader:
     @classmethod
-    def from_dict(self, d):
+    def from_dict(cls, d):
         return CronHeader(**d)
 
     def __init__(self, id, task_type, properties, owner_id, guild_id, schedule):
@@ -498,6 +499,13 @@ def cron_parse(schedule_str):
                     cronstr=schedule_str
                 )
 
+        # Verify item range
+        if result < lower or result > upper:
+            msg = "position {}({}): {} outside bounds {}>{}>{}"
+            raise ScheduleParseException(
+                msg.format(i, name, elem, lower, elem, upper),
+                cronstr=schedule_str
+            )
 
         s_dict[name] = result
 
@@ -584,7 +592,9 @@ def cron_next_date(schedule, from_date=None, carry=0):
     # Day of month is tricky. If there was a carry, that means we flipped
     # to the next month, and potentially the next year. If that's the case,
     # then we need to do a second round.
-    new_day, carry = _cron_next_day(schedule, carry,
+    new_day, carry = _cron_next_day(
+        schedule,
+        carry,
         day=next_date["dayofmonth"],
         month=next_date["month"],
         year=next_date["year"]
@@ -608,7 +618,8 @@ def cron_next_date(schedule, from_date=None, carry=0):
         else:
             month_la += 1
 
-        new_day, extra_carry = _cron_next_day(schedule, 0,
+        new_day, extra_carry = _cron_next_day(
+            schedule, 0,
             day=1,
             month=month_la,
             year=year_la
@@ -662,7 +673,7 @@ def _limit_elem(elem_name, t):
         return 1, upper
 
     elif elem_name == "year":
-        return datetime.MIN_YEAR, datetime.MAX_YEAR
+        return MINYEAR, MAXYEAR
 
     else:
         return SCHED_LIMITS[elem_name]
@@ -683,7 +694,7 @@ def _next_elem(elem_name, elem, carry, t, schedule):
         str(sched_elem)
     ))
 
-    # If our sched element can be anything, don't touch it. (Note that
+    # If our sched element can be anything, don't touch it. Note that
     # the carry has already been taken into account. We just need to check
     # whether the carry made this element roll over.
     if sched_elem is None:
@@ -722,7 +733,7 @@ def _next_elem(elem_name, elem, carry, t, schedule):
 @functools.cache
 def cron_calc_days(year, month, wd):
     # Calendar starts at 0 = Monday, goes to 6 = Sunday. Cron format is offset
-    # from that so we need to convert to python range.
+    # from that, so we need to convert to python range.
     wd = wd_cron_to_python(wd)
     c = calendar.Calendar()
     return [d for d, _wd in c.itermonthdays2(year, month)
@@ -865,6 +876,7 @@ class JobCron:
 
         await self.replace_schedule(id, new_hdr)
 
+
 ##################
 # BUILT IN TASKS #
 ##################
@@ -885,7 +897,7 @@ class BlockerTask(JobTask):
     @classmethod
     def property_default(cls, properties):
         return {
-            "time": 60 # seconds. if None, loops forever.
+            "time": 60  # seconds. if None, loops forever.
         }
 
     async def run(self, header):

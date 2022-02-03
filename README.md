@@ -17,8 +17,8 @@ ERROR:root:Please open startup.json and replace the secret with a proper API tok
 ERROR:root:For more information, see https://discordpy.readthedocs.io/en/stable/discord.html
 ```
 
-[Create a bot account](https://discordpy.readthedocs.io/en/stable/discord.html), and copy
-it into startup.json:
+[Create a bot account](https://discordpy.readthedocs.io/en/stable/discord.html), and copy the bot token
+into startup.json:
 
 ```json
 {

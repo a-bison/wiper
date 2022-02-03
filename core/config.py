@@ -2,10 +2,10 @@
 # Config classes for dynamic, persistent configuration. For use with asyncio.
 # 
 
-from pathlib import Path
 import asyncio
 import logging
 import json
+
 
 # Very simple config database consisting of json files on disk.
 # Saves a different version of the config depending on the guild.
@@ -29,7 +29,7 @@ class JsonConfigDB:
         elif path.exists():
             msg = "config {} is not a directory"
             raise FileExistsError(msg.format(str(path)))
-        else: # No file or dir, so create new
+        else:  # No file or dir, so create new
             self.create_new_db()
 
         self.load_main_cfg()

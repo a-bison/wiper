@@ -1,6 +1,5 @@
 from discord.ext import commands
 
-from functools import wraps
 import json
 
 
@@ -42,7 +41,7 @@ async def ack(ctx):
 
 
 def code(s):
-    # Note: Not using any format()s here so we can construct format strings
+    # Note: Not using any format()s here, so we can construct format strings
     # using the util.code* funcs
     return "```\n" + s + "\n```"
 
