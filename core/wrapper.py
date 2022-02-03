@@ -229,7 +229,7 @@ class DiscordJobFactory(job.JobFactory):
     # Create a new jobheader.
     async def create_jobheader(self, ctx, properties, task_type, schedule_id):
         header = job.JobHeader(
-            await self.next_id(),
+            self.next_id(),
             task_type,
             properties,
             ctx.message.author.id,
@@ -244,7 +244,7 @@ class DiscordJobFactory(job.JobFactory):
     async def create_job(self, ctx, task_type, properties, schedule_id=None):
         task_type = self.task_registry.force_str(task_type)
         header = await self.create_jobheader(ctx, properties, task_type, schedule_id)
-        j = self.create_job_from_jobheader(header)
+        j = await self.create_job_from_jobheader(header)
         return j
 
     # OVERRIDE
@@ -403,7 +403,7 @@ class JobManagement(commands.Cog):
         jobs = self.get_guild_jobs(ctx.guild)
 
         if id in jobs:
-            if self.job_can_modify(ctx, jobs[id].header.owner_id):
+            if not self.job_can_modify(ctx, jobs[id].header.owner_id):
                 raise NotAdministrator("cancel jobs started by other users")
 
             await self.jq.canceljob(id)
@@ -423,7 +423,7 @@ class JobManagement(commands.Cog):
         if corrected_user is None:
             return
 
-        if self.job_can_modify(ctx, corrected_user.id):
+        if not self.job_can_modify(ctx, corrected_user.id):
             raise NotAdministrator("cancel jobs started by other users")
 
         jobs = [j for _, j in self.get_guild_jobs(ctx.guild).items()
