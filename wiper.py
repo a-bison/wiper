@@ -68,6 +68,8 @@ class Wiper:
 
         # Discord bot init
         self.bot.event(self.on_command_error)
+        self.bot.add_listener(self.on_ready)
+        self.bot.add_listener(self.on_message)
         self.bot.add_cog(core.wrapper.JobManagement(self.core))
         self.bot.add_cog(Wiping(self.core))
         self.bot.add_cog(Config(self.core))
@@ -98,6 +100,25 @@ class Wiper:
             msg = "Unexpected error in command:"
             logging.error(msg)
             raise error
+
+    async def on_message(self, message):
+        # If we get pinged, send current prefix and help
+        if message.mentions and self.bot.user in message.mentions:
+            # Hacky: build up a help command as if it was called
+            # on the current server
+            cmd = self.bot.help_command
+            cmd = cmd.copy()
+            cmd.context = await self.bot.get_context(message)
+            cmd.context.prefix = await self.get_command_prefix(self.bot, message)
+
+            # Send help
+            await message.channel.send("Command prefix is " + cmd.context.prefix)
+            await cmd.send_bot_help(cmd.get_bot_mapping())
+
+    async def on_ready(self):
+        await self.bot.change_presence(
+            activity=discord.Game("ping me for commands")
+        )
 
 
 # Shorthand function for getting a date a given number of time units before now.
