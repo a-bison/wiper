@@ -371,8 +371,14 @@ class JobManagement(commands.Cog):
             owner_id == ctx.author.id
         )
 
+    @commands.group(aliases=["jobs"], invoke_without_command=True)
+    async def job(self, ctx):
+        """View or modify actively queued jobs."""
+        await ctx.send("Specify a subcommand.")
+        await ctx.send_help("job")
+
     # List jobs for a given guild.
-    @commands.command()
+    @job.command(name="list")
     async def joblist(self, ctx):
         """List enqueued jobs."""
         jobs = self.get_guild_jobs(ctx.guild)
@@ -383,7 +389,7 @@ class JobManagement(commands.Cog):
         else:
             await ctx.send("No jobs.")
 
-    @commands.command()
+    @job.command(name="raw")
     async def jobraw(self, ctx, id: int):
         """Print the internal representation of a job. Mostly for debugging."""
         jobs = self.get_guild_jobs(ctx.guild)
@@ -393,9 +399,9 @@ class JobManagement(commands.Cog):
         else:
             await ctx.send("Job {} does not exist.".format(id))
 
-    @commands.command()
+    @job.command(name="cancel")
     async def jobcancel(self, ctx, id: int):
-        """Cancel a job listed by ?joblist.
+        """Cancel a job listed in the job list.
 
         Members may only cancel jobs they started. Users with the Administrator
         permission may cancel any job.
@@ -411,7 +417,7 @@ class JobManagement(commands.Cog):
         else:
             await ctx.send("Job {} does not exist.".format(id))
 
-    @commands.command()
+    @job.command(name="canceluser")
     async def jobcanceluser(self, ctx, user: typing.Optional[discord.Member], *rest):
         """Cancel all jobs started by a specific user.
 
@@ -438,7 +444,7 @@ class JobManagement(commands.Cog):
 
         await ack(ctx)
 
-    @commands.command()
+    @job.command(name="cancelall")
     @util.check_administrator()
     async def jobcancelall(self, ctx):
         """Cancel all jobs. Only Administrators may use this command.
@@ -450,7 +456,7 @@ class JobManagement(commands.Cog):
 
         await ack(ctx)
 
-    @commands.command()
+    @job.command("flush")
     @commands.is_owner()
     async def jobflush(self, ctx):
         """Cancel all jobs currently scheduled, across all servers.
@@ -477,7 +483,58 @@ class JobManagement(commands.Cog):
 
         return s
 
-    @commands.command()
+    @commands.group(aliases=["schedule"], invoke_without_command=True)
+    async def cron(self, ctx):
+        """View or modify scheduled jobs."""
+        await ctx.send("Specify a subcommand.")
+        await ctx.send_help("cron")
+
+    # Run a generic cron cmd.
+    async def _run_croncmd(self, coro, ctx, cron_id, *args, require_ownership=False):
+        crons = self.jc.sched_filter(guild_id=ctx.guild.id)
+
+        if cron_id in crons:
+            cron = crons[cron_id]
+
+            cron_can_modify = (
+                    ctx.author.guild_permissions.administrator or
+                    cron.owner_id == ctx.member.id
+            )
+
+            if require_ownership and not cron_can_modify:
+                raise NotAdministrator("force run schedules created by other users")
+
+            try:
+                # If a method is supplied, no need to feed in self
+                if inspect.ismethod(coro):
+                    await coro(ctx, cron, *args)
+                else:
+                    await coro(self, ctx, cron, *args)
+            except job.ScheduleParseException as e:
+                # Catch any schedule parse exceptions that might happen
+                msg = "Could not parse cron str \"{}\": {}"
+                await ctx.send(msg.format(e.cronstr, str(e)))
+        else:
+            await ctx.send("Schedule {} does not exist.".format(cron_id))
+
+    # A command that operates on a single schedule entry by ID.
+    # coro must be coro(self, ctx, cron)
+    def _croncmd(entity=commands, name=None, **run_croncmd_args):
+        def decorator(coro):
+            nonlocal name
+
+            if name is None:
+                name = coro.__name__
+
+            @util.command_wraps(coro, entity=entity, name=name)
+            async def run(self, ctx, id: int):
+                await self._run_croncmd(coro, ctx, id, **run_croncmd_args)
+
+            return run
+
+        return decorator
+
+    @cron.command(name="list")
     async def cronlist(self, ctx):
         """List scheduled jobs."""
         crons = self.jc.sched_filter(guild_id=ctx.guild.id)
@@ -488,7 +545,7 @@ class JobManagement(commands.Cog):
         else:
             await ctx.send("Nothing scheduled.")
 
-    @commands.command()
+    @cron.command(name="create")
     @commands.is_owner()
     async def croncreate(self, ctx, task_type: str, cronstr: str, *, params_json):
         """Create a schedule for an arbitrary job. Bot owner only."""
@@ -512,59 +569,19 @@ class JobManagement(commands.Cog):
         except job.ScheduleParseException as e:
             msg = "Could not parse cron str \"{}\": {}"
             await ctx.send(msg.format(e.cronstr, str(e)))
-    
-    # Run a generic cron cmd.
-    async def _run_croncmd(self, coro, ctx, cron_id, *args, require_ownership=False):
-        crons = self.jc.sched_filter(guild_id=ctx.guild.id)
 
-        if cron_id in crons:
-            cron = crons[cron_id]
-
-            cron_can_modify = (
-                ctx.author.guild_permissions.administrator or
-                cron.owner_id == ctx.member.id
-            )
-
-            if require_ownership and not cron_can_modify:
-                raise NotAdministrator("force run schedules created by other users")
-            
-            try:
-                # If a method is supplied, no need to feed in self
-                if inspect.ismethod(coro):
-                    await coro(ctx, cron, *args)
-                else:
-                    await coro(self, ctx, cron, *args)
-            except job.ScheduleParseException as e:
-                # Catch any schedule parse exceptions that might happen
-                msg = "Could not parse cron str \"{}\": {}"
-                await ctx.send(msg.format(e.cronstr, str(e)))
-        else:
-            await ctx.send("Schedule {} does not exist.".format(cron_id))
-
-    # A command that operates on a single schedule entry by ID.
-    # coro must be coro(self, ctx, cron)
-    def _croncmd(**run_croncmd_args):
-        def decorator(coro):
-            @util.command_wraps(coro)
-            async def run(self, ctx, id: int):
-                await self._run_croncmd(coro, ctx, id, **run_croncmd_args)
-
-            return run
-        
-        return decorator
-
-    @_croncmd()
+    @_croncmd(cron, name="raw")
     async def cronraw(self, ctx, cron):
         """Print the internal representation of a schedule."""
         await ctx.send(util.codejson(cron.as_dict()))
 
-    @_croncmd(require_ownership=True)
+    @_croncmd(cron, name="delete", require_ownership=True)
     async def crondelete(self, ctx, cron):
         """Delete a schedule."""
         await self.jc.delete_schedule(cron.id)
         await ack(ctx)
 
-    @_croncmd(require_ownership=True)
+    @_croncmd(cron, name="force", require_ownership=True)
     async def cronforce(self, ctx, cron):
         """Force a scheduled job to run immediately."""
         await self.jc.run_now(cron.id)
@@ -576,14 +593,14 @@ class JobManagement(commands.Cog):
         await self.jc.reschedule(cron.id, cronstr)
         await ack(ctx)
 
-    @commands.command()
+    @cron.command(name="reschedule")
     async def cronreschedule(self, ctx, id: int, cronstr: str):
         """Reschedule a cron job."""
         await self._run_croncmd(
             self._cronreschedule, ctx, id, cronstr, require_ownership=True
         )
 
-    @commands.command()
+    @cron.command(name="flush")
     @commands.is_owner()
     async def cronflush(self, ctx):
         """Delete all schedules, and reset ID counter to 0. Bot owner only."""

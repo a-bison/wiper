@@ -57,13 +57,18 @@ def codejson(j):
 # More primitive wrapper that does not set the __wrapped__ attribute.
 # This forces the command decorator to use the wrapper function annotations
 # for parameter checking, rather than the wrapped function's annotations.
-def command_wraps(wrapped, *args, **kwargs):
+#
+# If specified, entity specifies what group this command should be added to.
+def command_wraps(wrapped, entity=commands, *args, **kwargs):
+    if entity is None:
+        entity = commands
+
     def decorator(wrapper):
         wrapper.__name__ = wrapped.__name__
         wrapper.__qualname__ = wrapped.__qualname__
         wrapper.__doc__ = wrapped.__doc__
         wrapper.__module__ = wrapped.__module__
 
-        return commands.command(*args, **kwargs)(wrapper)
+        return entity.command(*args, **kwargs)(wrapper)
 
     return decorator
