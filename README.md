@@ -1,6 +1,8 @@
 # Wiper
 An automated message cleaner bot for Discord written using [discord.py](https://github.com/Rapptz/discord.py).
 
+This bot uses my WIP [monkycord](https://github.com/a-bison/monkycord) toolkit, and is being developed in tandem with it.
+
 I'm aware there are a lot of mod bots that do something similar, but I wanted to give it a
 try myself, for educational purposes.
 

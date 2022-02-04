@@ -1,0 +1,3 @@
+[submodule "monkycord"]
+	path = monkycord
+	url = https://github.com/a-bison/monkycord

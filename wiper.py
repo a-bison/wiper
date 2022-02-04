@@ -7,13 +7,13 @@ import asyncio
 import logging
 import typing
 
-import core.config
-import core.job
-import core.util as util
-import core.wrapper
-from core.exception import NotAdministrator
-from core.util import ack
-from core.wrapper import ConfigCogBase
+import monkycord.config
+import monkycord.job
+import monkycord.util as util
+import monkycord.wrapper
+from monkycord.exception import NotAdministrator
+from monkycord.util import ack
+from monkycord.wrapper import ConfigCogBase
 
 logging.basicConfig(level=logging.INFO)
 
@@ -56,26 +56,26 @@ class Wiper:
         self.common_cfgtemplate = {}
 
         # Bot core initialization
-        self.core = core.wrapper.CoreWrapper(
+        self.core = monkycord.wrapper.CoreWrapper(
             self.bot,
             Path(config_path),
             self.cfgtemplate,
             self.common_cfgtemplate
         )
-        self.core.task(core.job.BlockerTask)
-        self.core.task(core.wrapper.MessageTask)
+        self.core.task(monkycord.job.BlockerTask)
+        self.core.task(monkycord.wrapper.MessageTask)
         self.core.task(WipeTask)
 
         # Discord bot init
         self.bot.event(self.on_command_error)
         self.bot.add_listener(self.on_ready)
         self.bot.add_listener(self.on_message)
-        self.bot.add_cog(core.wrapper.JobManagement(self.core))
+        self.bot.add_cog(monkycord.wrapper.JobManagement(self.core))
         self.bot.add_cog(Wiping(self.core))
         self.bot.add_cog(Config(self.core))
 
         if ENABLE_DEBUG_COMMANDS:
-            self.bot.add_cog(core.wrapper.JobDebug())
+            self.bot.add_cog(monkycord.wrapper.JobDebug())
             self.bot.add_cog(Debug(self.core))
 
     def run(self):
@@ -430,8 +430,8 @@ class Wiping(commands.Cog):
             return
 
         try:
-            core.job.cron_parse(schedule)
-        except core.job.ScheduleParseException as e:
+            monkycord.job.cron_parse(schedule)
+        except monkycord.job.ScheduleParseException as e:
             await ctx.send("Could not parse cron str: " + str(e))
             return
 
@@ -447,7 +447,7 @@ class PermissionException(Exception):
     pass
 
 
-class WipeTask(core.job.JobTask):
+class WipeTask(monkycord.job.JobTask):
     def __init__(self, bot, guild):
         self.bot = bot
         self.guild = guild
@@ -605,12 +605,12 @@ class Debug(commands.Cog):
         }
 
         logging.info("MessageJob: " + str(properties))
-        await self.core.start_job(ctx, core.wrapper.MessageTask, properties)
+        await self.core.start_job(ctx, monkycord.wrapper.MessageTask, properties)
         await ack(ctx)
 
     @commands.command()
     async def blockerjob(self, ctx):
-        await self.core.start_job(ctx, core.job.BlockerTask, {})
+        await self.core.start_job(ctx, monkycord.job.BlockerTask, {})
         await ack(ctx)
 
     @commands.command()
@@ -631,8 +631,8 @@ class Debug(commands.Cog):
 
 
 def main():
-    startup_cfg = core.config.JsonConfig(STARTUP_CONFIG_LOCATION,
-                                         template=STARTUP_CONFIG_TEMPLATE)
+    startup_cfg = monkycord.config.JsonConfig(STARTUP_CONFIG_LOCATION,
+                                              template=STARTUP_CONFIG_TEMPLATE)
 
     if startup_cfg.opts["secret"] == DEFAULT_SECRET:
         logging.error("Please open {} and replace the secret with a proper API token.".format(STARTUP_CONFIG_LOCATION))
