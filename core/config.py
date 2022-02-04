@@ -1,8 +1,7 @@
 #
-# Config classes for dynamic, persistent configuration. For use with asyncio.
+# Config classes for dynamic, persistent configuration.
 # 
 
-import asyncio
 import logging
 import json
 
@@ -18,7 +17,6 @@ import json
 class JsonConfigDB:
     def __init__(self, path, template=None, main_template=None):
         self.path = path
-        self.create_lock = asyncio.Lock()
         self.db = {}
         self.template = template
         self.main_template = main_template
@@ -29,7 +27,7 @@ class JsonConfigDB:
         elif path.exists():
             msg = "config {} is not a directory"
             raise FileExistsError(msg.format(str(path)))
-        else:  # No file or dir, so create new
+        else: # No file or dir, so create new
             self.create_new_db()
 
         self.load_main_cfg()
@@ -68,15 +66,15 @@ class JsonConfigDB:
                                            self.template)
             logging.info("Load config: guild id {}".format(guild_id))
 
-    async def write_db(self):
+    def write_db(self):
         for cfg in self.db.values():
-            await cfg.awrite()
+            cfg.write()
 
     # Gets the config for a single guild. If the config for a guild doesn't
     # exist, create it.
-    async def get_config(self, guild):
+    def get_config(self, guild):
         if guild.id not in self.db:
-            await self.create_config(guild)
+            self.create_config(guild)
 
         return self.db[guild.id]
 
@@ -84,82 +82,40 @@ class JsonConfigDB:
     def get_common_config(self):
         return self.main_cfg
 
-    async def create_config(self, guild):
-        async with self.create_lock:
-            self.db[guild.id] = JsonConfig(self.cfg_loc(guild.id), self.template)
+    def create_config(self, guild):
+        self.db[guild.id] = JsonConfig(self.cfg_loc(guild.id), self.template)
 
 
-# Used in AtomicConfigMixin.
-def _atomic(write=True):
-    def decorator(f):
-        async def go(self, *args, **kwargs):
-            async with self:
-                result = f(self, *args, **kwargs)
-
-                if write:
-                    self.write()
-
-                return result
-
-        return go
-
-    return decorator
-
-
-# Mixin for atomic configuration. Expects the following:
+# Mixin for configuration. Expects the following:
 # - write() function that writes the configuration.
 # - clear() function that clears the configuration.
 # - a property called "opts" that allows dictionary operations.
-class AtomicConfigMixin:
-    def __init__(self, **kwargs):
-        self.atomic_lock = asyncio.Lock()
-    
-    def get_lock(self):
-        return self.atomic_lock
-
-    @_atomic()
-    def aset(self, key, value):
+class ConfigMixin:
+    def set(self, key, value):
         self.opts[key] = value
+        self.write()
 
-    @_atomic(write=False)
-    def aget(self, key):
+    def get(self, key):
         return self.opts[key]
 
-    @_atomic()
-    def aget_and_set(self, key, f):
+    def get_and_set(self, key, f):
         self.opts[key] = f(self.opts[key])
+        self.write()
 
-    @_atomic()
-    def adelete(self, key, ignore_keyerror=False):
+    def delete(self, key, ignore_keyerror=False):
         if ignore_keyerror and key not in self.opts:
             return
 
         del self.opts[key]
-
-    @_atomic()
-    def awrite(self):
         self.write()
 
-    @_atomic()
-    def aclear(self):
-        self.clear()
-
     # Clears an entire config, and returns a copy of what was just cleared.
-    @_atomic()
-    def aget_and_clear(self):
+    def get_and_clear(self):
         cfg = dict(self.opts)
         self.clear()
+        self.write()
 
         return cfg
-
-    # Allow async with to be used on the object. Just pass through to
-    # atomic_lock
-    async def __aenter__(self):
-        await self.get_lock().__aenter__()
-        return None
-
-    async def __aexit__(self, *args):
-        await self.get_lock().__aexit__(*args)
 
 
 # Enable a config to get subconfigs.
@@ -168,8 +124,7 @@ class SubconfigMixin:
         return SubConfig(self, key, self.opts[key])
 
 
-# FIXME Not all subconfigs should be atomic...
-class SubConfig(AtomicConfigMixin, SubconfigMixin):
+class SubConfig(ConfigMixin, SubconfigMixin):
     def __init__(self, parent, name, cfg):
         super().__init__()
 
@@ -188,14 +143,10 @@ class SubConfig(AtomicConfigMixin, SubconfigMixin):
     def write(self):
         self.parent.write()
 
-    # OVERRIDDEN from Atomic mixin.
-    def get_lock(self):
-        return self.parent.get_lock()
-
 
 # Simple on-disk persistent configuration for one guild (or anything else that
 # only needs one file)
-class JsonConfig(AtomicConfigMixin, SubconfigMixin):
+class JsonConfig(ConfigMixin, SubconfigMixin):
     def __init__(self, path, template=None):
         super().__init__()
 

@@ -80,8 +80,8 @@ class Wiper:
         self.core.run(self.secret)
 
     async def get_command_prefix(self, bot, message):
-        cfg = await self.core.cfg(message)
-        return await cfg.aget("command_prefix")
+        cfg = self.core.cfg(message)
+        return cfg.get("command_prefix")
 
     async def on_command_error(self, ctx, error):
         # If it's a generic command invoke error, use the cause exception.
@@ -201,8 +201,8 @@ class Wiping(commands.Cog):
 
         # Post age
         if older_than is None:
-            cfg = await self.core.cfg(ctx)
-            older_than = await cfg.aget("default_post_age")
+            cfg = self.core.cfg(ctx)
+            older_than = cfg.get("default_post_age")
 
         wipe_channels = self.args_to_ids(wipe_channels)
         except_channels = self.args_to_ids(except_channels)

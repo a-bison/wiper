@@ -84,7 +84,7 @@ class CoreWrapper:
     # properly
     async def resume_jobs(self):
         for guild_id, cfg in self.config_db.db.items():
-            jobs = await cfg.sub("jobs").aget_and_clear()
+            jobs = cfg.sub("jobs").get_and_clear()
 
             for job_id, job_header in jobs.items():
                 await self.resume_job(job_header)
@@ -100,7 +100,7 @@ class CoreWrapper:
     # Reschedule all cron entries from cfg
     async def reschedule_all_cron(self):
         for guild_id, cfg in self.config_db.db.items():
-            crons = await cfg.sub("cron").aget_and_clear()
+            crons = cfg.sub("cron").get_and_clear()
 
             for sched_id, sched_header in crons.items():
                 await self.reschedule_cron(sched_header)
@@ -109,9 +109,9 @@ class CoreWrapper:
             logging.info(msg.format(len(crons), guild_id))
 
     # Get the config object for a given job/cron header.
-    async def get_cfg_for_header(self, header):
+    def get_cfg_for_header(self, header):
         guild = self.bot.get_guild(header.guild_id)
-        cfg = await self.config_db.get_config(guild)
+        cfg = self.config_db.get_config(guild)
 
         return cfg
 
@@ -121,38 +121,38 @@ class CoreWrapper:
 
     # When a job is submitted, create an entry in the config DB.
     async def _cfg_job_create(self, header):
-        cfg = await self.get_cfg_for_header(header)
-        await cfg.sub("jobs").aset(str(header.id), header.as_dict())
+        cfg = self.get_cfg_for_header(header)
+        cfg.sub("jobs").set(str(header.id), header.as_dict())
 
     # Once a job is done, delete it from the config db.
     async def _cfg_job_delete(self, header):
-        cfg = await self.get_cfg_for_header(header)
-        await cfg.sub("jobs").adelete(str(header.id), ignore_keyerror=True)
+        cfg = self.get_cfg_for_header(header)
+        cfg.sub("jobs").delete(str(header.id), ignore_keyerror=True)
 
     # Add created schedules to the config DB, and increase the
     # last_schedule_id parameter.
     async def _cfg_sched_create(self, header):
-        cfg = await self.get_cfg_for_header(header)
-        await cfg.sub("cron").aset(str(header.id), header.as_dict())
+        cfg = self.get_cfg_for_header(header)
+        cfg.sub("cron").set(str(header.id), header.as_dict())
 
         common_cfg = self.config_db.get_common_config()
-        await common_cfg.aget_and_set(
+        common_cfg.get_and_set(
             "last_schedule_id",
             lambda val: max(val, header.id)
         )
 
     # Remove deleted schedules from the config DB.
     async def _cfg_sched_delete(self, header):
-        cfg = await self.get_cfg_for_header(header)
-        await cfg.sub("cron").adelete(str(header.id))
+        cfg = self.get_cfg_for_header(header)
+        cfg.sub("cron").delete(str(header.id))
 
     # Create configs for any guilds we were added to while offline
     async def join_guilds_offline(self):
         async for guild in self.bot.fetch_guilds():
             logging.info("In guilds: {}({})".format(guild.name, guild.id))
-            _ = await self.config_db.get_config(guild)
+            _ = self.config_db.get_config(guild)
 
-        await self.config_db.write_db()
+        self.config_db.write_db()
 
     async def on_ready(self):
         if not self.jobs_resumed:
@@ -210,8 +210,8 @@ class CoreWrapper:
 
     # Shortcut to get the config for a given command.
     # Also supports messages.
-    async def cfg(self, ctx):
-        cfg = await self.config_db.get_config(ctx.guild)
+    def cfg(self, ctx):
+        cfg = self.config_db.get_config(ctx.guild)
         return cfg
 
 
@@ -607,7 +607,7 @@ class JobManagement(commands.Cog):
         for id, cron in self.jc.sched_copy():
             await self.jc.delete_schedule(id)
 
-        await self.core.config_db.get_common_config().aset("last_schedule_id", 0)
+        await self.core.config_db.get_common_config().set("last_schedule_id", 0)
         await ack(ctx)
 
 
@@ -713,7 +713,7 @@ class ConfigCogBase(commands.Cog):
 
             @util.command_wraps(coro, **kwargs)
             async def go(self, ctx, value: typing.Optional[str]):
-                cfg = await self.core.cfg(ctx)
+                cfg = self.core.cfg(ctx)
 
                 if cfg_key is None:
                     key = coro.__name__
@@ -723,7 +723,7 @@ class ConfigCogBase(commands.Cog):
                 # GET
                 if value is None:
                     display_name = key.replace("_", " ").capitalize()
-                    value = await cfg.aget(key)
+                    value = cfg.get(key)
                     await ctx.reply("{} is {}.".format(display_name, value))
                     return
 
@@ -736,7 +736,7 @@ class ConfigCogBase(commands.Cog):
                     value = converter(value)
 
                 await coro(self, ctx, cfg, key, value)
-                await cfg.aset(key, value)
+                cfg.set(key, value)
                 await ack(ctx)
 
             return go
