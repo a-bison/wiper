@@ -507,11 +507,15 @@ class WipeTask(monkycord.JobTask):
         return self.include_msg(p, msg) and not self.exclude_msg(p, msg)
 
     # Delete history of a single channel. Returns number of messages deleted.
-    async def wipe_channel(self, channel, datetime):
+    async def wipe_channel(self, p, channel, datetime):
         msgcount = 0
 
         async for message in channel.history(limit=None, before=datetime):
             await asyncio.sleep(DELETE_DELAY)
+
+            if not self.match_msg(p, message):
+                continue
+
             await message.delete()
             msgcount += 1
 
@@ -529,11 +533,11 @@ class WipeTask(monkycord.JobTask):
     # in a channel, and there's nothing to do, mark that channel as complete.
     # The wipe job is complete when there is nothing to delete across all
     # channels.
-    async def wipe_cycle(self, channels, datetime):
+    async def wipe_cycle(self, p, channels, datetime):
         complete_channels = {}
 
         for channel in channels.values():
-            msgs_deleted = await self.wipe_channel(channel, datetime)
+            msgs_deleted = await self.wipe_channel(p, channel, datetime)
             if msgs_deleted == 0:
                 complete_channels[channel.id] = channel
 
@@ -551,7 +555,7 @@ class WipeTask(monkycord.JobTask):
 
         channels = self.get_delete_channels(p)
         while self.more_to_delete(completed_channels, channels):
-            complete = await self.wipe_cycle(channels, date_time)
+            complete = await self.wipe_cycle(p, channels, date_time)
             completed_channels.update(complete)
             channels = self.get_delete_channels(p)
 
